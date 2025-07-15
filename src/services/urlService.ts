@@ -1,14 +1,45 @@
 
-import logger from './loggingMiddleware';
+export interface UrlData {
+  id: string;
+  originalUrl: string;
+  shortcode: string;
+  createdAt: string;
+  expiresAt: string;
+  validityMinutes: number;
+}
+
+export interface ClickData {
+  timestamp: string;
+  source: string;
+  location: string;
+  userAgent: string;
+}
+
+export interface UrlWithStats extends UrlData {
+  shortUrl: string;
+  clickCount: number;
+  clicks: ClickData[];
+}
 
 class UrlService {
+  private urls: UrlData[] = [];
+  private clicks: Record<string, ClickData[]> = {};
+
   constructor() {
-    this.urls = JSON.parse(localStorage.getItem('shortened_urls') || '[]');
-    this.clicks = JSON.parse(localStorage.getItem('url_clicks') || '{}');
-    logger.info('UrlService initialized', { urlCount: this.urls.length });
+    this.loadFromStorage();
   }
 
-  generateShortcode() {
+  private loadFromStorage() {
+    this.urls = JSON.parse(localStorage.getItem('shortened_urls') || '[]');
+    this.clicks = JSON.parse(localStorage.getItem('url_clicks') || '{}');
+  }
+
+  private saveToStorage() {
+    localStorage.setItem('shortened_urls', JSON.stringify(this.urls));
+    localStorage.setItem('url_clicks', JSON.stringify(this.clicks));
+  }
+
+  private generateShortcode(): string {
     const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
     let result = '';
     for (let i = 0; i < 6; i++) {
@@ -17,94 +48,79 @@ class UrlService {
     return result;
   }
 
-  isValidUrl(string) {
+  isValidUrl(string: string): boolean {
     try {
       new URL(string);
       return true;
-    } catch (_) {
+    } catch {
       return false;
     }
   }
 
-  isValidShortcode(shortcode) {
+  isValidShortcode(shortcode: string): boolean {
     const regex = /^[a-zA-Z0-9]{3,10}$/;
     return regex.test(shortcode);
   }
 
-  isShortcodeUnique(shortcode) {
+  private isShortcodeUnique(shortcode: string): boolean {
     return !this.urls.some(url => url.shortcode === shortcode);
   }
 
-  createShortUrl(originalUrl, customShortcode = null, validityMinutes = 30) {
-    logger.info('Creating short URL', { originalUrl, customShortcode, validityMinutes });
-
-    // Validate original URL
+  createShortUrl(originalUrl: string, customShortcode?: string, validityMinutes: number = 30): UrlWithStats {
     if (!this.isValidUrl(originalUrl)) {
-      logger.error('Invalid URL provided', { originalUrl });
       throw new Error('Please provide a valid URL');
     }
 
-    // Handle shortcode
     let shortcode = customShortcode;
     if (customShortcode) {
       if (!this.isValidShortcode(customShortcode)) {
-        logger.error('Invalid shortcode format', { customShortcode });
         throw new Error('Shortcode must be 3-10 alphanumeric characters');
       }
       if (!this.isShortcodeUnique(customShortcode)) {
-        logger.error('Shortcode already exists', { customShortcode });
         throw new Error('This shortcode is already taken');
       }
     } else {
-      // Generate unique shortcode
       do {
         shortcode = this.generateShortcode();
       } while (!this.isShortcodeUnique(shortcode));
     }
 
-    // Calculate expiry
     const createdAt = new Date();
     const expiresAt = new Date(createdAt.getTime() + validityMinutes * 60 * 1000);
 
-    const urlData = {
-      id: Date.now() + Math.random(),
+    const urlData: UrlData = {
+      id: Date.now() + Math.random().toString(),
       originalUrl,
-      shortcode,
+      shortcode: shortcode!,
       createdAt: createdAt.toISOString(),
       expiresAt: expiresAt.toISOString(),
       validityMinutes
     };
 
     this.urls.push(urlData);
-    this.clicks[shortcode] = [];
+    this.clicks[shortcode!] = [];
     this.saveToStorage();
 
-    logger.info('Short URL created successfully', { shortcode, originalUrl });
     return {
       ...urlData,
-      shortUrl: `http://localhost:3000/${shortcode}`
+      shortUrl: `${window.location.origin}/${shortcode}`,
+      clickCount: 0,
+      clicks: []
     };
   }
 
-  getUrlByShortcode(shortcode) {
+  getUrlByShortcode(shortcode: string): UrlData | null {
     const url = this.urls.find(u => u.shortcode === shortcode);
-    if (!url) {
-      logger.warn('Short URL not found', { shortcode });
-      return null;
-    }
+    if (!url) return null;
 
-    // Check if expired
     if (new Date() > new Date(url.expiresAt)) {
-      logger.warn('Short URL has expired', { shortcode, expiresAt: url.expiresAt });
       return null;
     }
 
     return url;
   }
 
-  recordClick(shortcode, source = 'direct', location = 'Unknown') {
-    logger.info('Recording click', { shortcode, source, location });
-    
+  recordClick(shortcode: string, source: string = 'direct', location: string = 'Unknown') {
     if (!this.clicks[shortcode]) {
       this.clicks[shortcode] = [];
     }
@@ -119,19 +135,14 @@ class UrlService {
     this.saveToStorage();
   }
 
-  getAllUrls() {
+  getAllUrls(): UrlWithStats[] {
     return this.urls.map(url => ({
       ...url,
-      shortUrl: `http://localhost:3000/${url.shortcode}`,
+      shortUrl: `${window.location.origin}/${url.shortcode}`,
       clickCount: this.clicks[url.shortcode]?.length || 0,
       clicks: this.clicks[url.shortcode] || []
     }));
   }
-
-  saveToStorage() {
-    localStorage.setItem('shortened_urls', JSON.stringify(this.urls));
-    localStorage.setItem('url_clicks', JSON.stringify(this.clicks));
-  }
 }
 
-export default new UrlService();
+export const urlService = new UrlService();
