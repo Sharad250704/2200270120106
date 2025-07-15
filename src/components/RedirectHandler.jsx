@@ -1,17 +1,22 @@
-
 import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Loader2, Home, ExternalLink } from 'lucide-react';
-import { urlService } from '@/services/urlService';
+import { urlService } from '@/services/urlService.js';
+import { logger } from '@/utils/logger.js';
 
 export default function RedirectHandler() {
-  const { shortcode } = useParams<{ shortcode: string }>();
+  const { shortcode } = useParams();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [redirecting, setRedirecting] = useState(false);
+
+  logger.info('RedirectHandler', 'Component initialized', {
+    shortcode,
+    timestamp: new Date().toISOString()
+  });
 
   useEffect(() => {
     if (shortcode) {
@@ -20,27 +25,67 @@ export default function RedirectHandler() {
   }, [shortcode]);
 
   const handleRedirect = async () => {
-    if (!shortcode) return;
+    if (!shortcode) {
+      logger.error('RedirectHandler', 'No shortcode provided', {
+        reason: 'Missing shortcode parameter'
+      });
+      return;
+    }
+    
+    const startTime = Date.now();
+    
+    logger.info('RedirectHandler', 'Starting redirect process', {
+      shortcode,
+      timestamp: new Date().toISOString()
+    });
     
     try {
       const urlData = urlService.getUrlByShortcode(shortcode);
       
       if (!urlData) {
+        logger.warn('RedirectHandler', 'Shortcode not found or expired', {
+          shortcode,
+          reason: 'URL not found or expired'
+        });
         setError('This short URL does not exist or has expired.');
         setLoading(false);
         return;
       }
+
+      logger.info('RedirectHandler', 'Valid URL found, recording click', {
+        shortcode,
+        originalUrl: urlData.originalUrl.substring(0, 100),
+        urlId: urlData.id
+      });
 
       urlService.recordClick(shortcode, 'direct_access', 'localhost');
       
       setRedirecting(true);
       setLoading(false);
       
+      const duration = Date.now() - startTime;
+      
+      logger.info('RedirectHandler', 'Redirecting user', {
+        shortcode,
+        originalUrl: urlData.originalUrl.substring(0, 100),
+        processingTime: duration,
+        redirectDelay: 1000
+      });
+      
       setTimeout(() => {
         window.location.href = urlData.originalUrl;
       }, 1000);
       
     } catch (err) {
+      const duration = Date.now() - startTime;
+      
+      logger.error('RedirectHandler', 'Redirect process failed', {
+        shortcode,
+        error: err.message,
+        stack: err.stack,
+        processingTime: duration
+      });
+      
       setError('An error occurred while processing your request.');
       setLoading(false);
     }

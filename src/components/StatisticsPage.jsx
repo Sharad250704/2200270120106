@@ -1,4 +1,3 @@
-
 import React, { useState, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -6,37 +5,84 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { ExternalLink, Eye, Clock } from 'lucide-react';
-import { urlService, UrlWithStats, ClickData } from '@/services/urlService';
+import { urlService } from '@/services/urlService.js';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { logger } from '@/utils/logger.js';
 
 export default function StatisticsPage() {
-  const [urls, setUrls] = useState<UrlWithStats[]>([]);
-  const [selectedUrl, setSelectedUrl] = useState<UrlWithStats | null>(null);
+  const [urls, setUrls] = useState([]);
+  const [selectedUrl, setSelectedUrl] = useState(null);
+
+  logger.info('StatisticsPage', 'Component initialized', {
+    timestamp: new Date().toISOString()
+  });
 
   const loadStatistics = useCallback(() => {
-    const urlData = urlService.getAllUrls();
-    setUrls(urlData);
+    const startTime = Date.now();
+    
+    logger.info('StatisticsPage', 'Loading statistics', {
+      timestamp: new Date().toISOString()
+    });
+    
+    try {
+      const urlData = urlService.getAllUrls();
+      setUrls(urlData);
+      
+      const duration = Date.now() - startTime;
+      
+      logger.info('StatisticsPage', 'Statistics loaded successfully', {
+        urlCount: urlData.length,
+        totalClicks: urlData.reduce((sum, url) => sum + url.clickCount, 0),
+        activeUrls: urlData.filter(url => new Date() <= new Date(url.expiresAt)).length,
+        expiredUrls: urlData.filter(url => new Date() > new Date(url.expiresAt)).length,
+        duration
+      });
+    } catch (error) {
+      logger.error('StatisticsPage', 'Failed to load statistics', {
+        error: error.message,
+        stack: error.stack
+      });
+    }
   }, []);
 
-  // Load statistics on component mount
   React.useEffect(() => {
     loadStatistics();
   }, [loadStatistics]);
 
-  const handleVisitUrl = (url: UrlWithStats) => {
+  const handleVisitUrl = (url) => {
+    logger.userAction('StatisticsPage', 'Visit URL clicked', {
+      shortcode: url.shortcode,
+      originalUrl: url.originalUrl.substring(0, 100),
+      urlId: url.id
+    });
+
     const urlData = urlService.getUrlByShortcode(url.shortcode);
     if (urlData) {
+      logger.info('StatisticsPage', 'Opening URL in new tab', {
+        shortcode: url.shortcode,
+        originalUrl: urlData.originalUrl.substring(0, 100)
+      });
+
       urlService.recordClick(url.shortcode, 'statistics_page', 'localhost');
       window.open(urlData.originalUrl, '_blank');
-      setTimeout(() => loadStatistics(), 100);
+      
+      setTimeout(() => {
+        logger.debug('StatisticsPage', 'Reloading statistics after click');
+        loadStatistics();
+      }, 100);
+    } else {
+      logger.warn('StatisticsPage', 'URL not found when attempting to visit', {
+        shortcode: url.shortcode,
+        reason: 'URL not found or expired'
+      });
     }
   };
 
-  const isExpired = (expiresAt: string): boolean => {
+  const isExpired = (expiresAt) => {
     return new Date() > new Date(expiresAt);
   };
 
-  const getLocationFromUserAgent = (userAgent: string): string => {
+  const getLocationFromUserAgent = (userAgent) => {
     if (userAgent.includes('Mobile')) return 'Mobile Device';
     if (userAgent.includes('Chrome')) return 'Chrome Browser';
     if (userAgent.includes('Firefox')) return 'Firefox Browser';
@@ -142,7 +188,7 @@ export default function StatisticsPage() {
                               <div className="max-h-96 overflow-y-auto">
                                 {selectedUrl && selectedUrl.clicks.length > 0 ? (
                                   <div className="space-y-3">
-                                    {selectedUrl.clicks.map((click: ClickData, index: number) => (
+                                    {selectedUrl.clicks.map((click, index) => (
                                       <div key={index} className="p-3 border rounded-lg">
                                         <div className="font-semibold">Click #{index + 1}</div>
                                         <div className="text-sm text-muted-foreground space-y-1">

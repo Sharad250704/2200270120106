@@ -1,4 +1,3 @@
-
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -6,83 +5,164 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Plus, Minus, Link as LinkIcon } from 'lucide-react';
-import { urlService, UrlWithStats } from '@/services/urlService';
-import { useToast } from '@/hooks/use-toast';
-
-interface UrlForm {
-  originalUrl: string;
-  customShortcode: string;
-  validityMinutes: number;
-}
+import { urlService } from '@/services/urlService.js';
+import { useToast } from '@/hooks/use-toast.js';
+import { logger } from '@/utils/logger.js';
 
 export default function UrlShortenerForm() {
-  const [urlForms, setUrlForms] = useState<UrlForm[]>([{
+  const [urlForms, setUrlForms] = useState([{
     originalUrl: '',
     customShortcode: '',
     validityMinutes: 30
   }]);
-  const [results, setResults] = useState<UrlWithStats[]>([]);
+  const [results, setResults] = useState([]);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const { toast } = useToast();
 
+  logger.info('UrlShortenerForm', 'Component initialized', {
+    initialFormCount: 1,
+    timestamp: new Date().toISOString()
+  });
+
   const addUrlForm = () => {
     if (urlForms.length < 5) {
+      logger.userAction('UrlShortenerForm', 'Add URL form', {
+        currentFormCount: urlForms.length,
+        newFormCount: urlForms.length + 1
+      });
+      
       setUrlForms([...urlForms, {
         originalUrl: '',
         customShortcode: '',
         validityMinutes: 30
       }]);
+    } else {
+      logger.warn('UrlShortenerForm', 'Maximum form limit reached', {
+        currentFormCount: urlForms.length,
+        maxAllowed: 5
+      });
     }
   };
 
-  const removeUrlForm = (index: number) => {
+  const removeUrlForm = (index) => {
     if (urlForms.length > 1) {
+      logger.userAction('UrlShortenerForm', 'Remove URL form', {
+        removedIndex: index,
+        currentFormCount: urlForms.length,
+        newFormCount: urlForms.length - 1
+      });
+      
       const newForms = urlForms.filter((_, i) => i !== index);
       setUrlForms(newForms);
+    } else {
+      logger.warn('UrlShortenerForm', 'Cannot remove last form', {
+        currentFormCount: urlForms.length,
+        minRequired: 1
+      });
     }
   };
 
-  const updateUrlForm = (index: number, field: keyof UrlForm, value: string | number) => {
+  const updateUrlForm = (index, field, value) => {
+    logger.debug('UrlShortenerForm', 'Form field updated', {
+      formIndex: index,
+      field,
+      valueLength: typeof value === 'string' ? value.length : 0,
+      hasValue: !!value
+    });
+    
     const newForms = [...urlForms];
     newForms[index] = { ...newForms[index], [field]: value };
     setUrlForms(newForms);
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
+    const startTime = Date.now();
+    
+    logger.info('UrlShortenerForm', 'Form submission started', {
+      totalForms: urlForms.length,
+      filledForms: urlForms.filter(form => form.originalUrl.trim()).length,
+      timestamp: new Date().toISOString()
+    });
+
     setError('');
     setResults([]);
     setLoading(true);
 
     try {
-      const newResults: UrlWithStats[] = [];
+      const newResults = [];
       
       for (let i = 0; i < urlForms.length; i++) {
         const form = urlForms[i];
         
-        if (!form.originalUrl.trim()) continue;
+        if (!form.originalUrl.trim()) {
+          logger.debug('UrlShortenerForm', 'Skipping empty form', {
+            formIndex: i,
+            reason: 'Empty originalUrl'
+          });
+          continue;
+        }
         
         try {
+          logger.debug('UrlShortenerForm', 'Processing form', {
+            formIndex: i,
+            hasCustomShortcode: !!form.customShortcode,
+            validityMinutes: form.validityMinutes,
+            urlLength: form.originalUrl.length
+          });
+
           const result = urlService.createShortUrl(
             form.originalUrl,
             form.customShortcode || undefined,
             parseInt(form.validityMinutes.toString()) || 30
           );
+          
           newResults.push(result);
+          
+          logger.info('UrlShortenerForm', 'URL shortened successfully', {
+            formIndex: i,
+            shortcode: result.shortcode,
+            urlId: result.id
+          });
         } catch (err) {
-          throw new Error(`Form ${i + 1}: ${err instanceof Error ? err.message : 'Unknown error'}`);
+          const errorMessage = `Form ${i + 1}: ${err instanceof Error ? err.message : 'Unknown error'}`;
+          
+          logger.error('UrlShortenerForm', 'URL shortening failed', {
+            formIndex: i,
+            error: err.message,
+            stack: err.stack,
+            formData: {
+              urlLength: form.originalUrl.length,
+              hasCustomShortcode: !!form.customShortcode,
+              validityMinutes: form.validityMinutes
+            }
+          });
+          
+          throw new Error(errorMessage);
         }
       }
 
       if (newResults.length === 0) {
+        logger.warn('UrlShortenerForm', 'No URLs to process', {
+          totalForms: urlForms.length,
+          reason: 'All forms empty'
+        });
         throw new Error('Please fill in at least one URL');
       }
 
+      const duration = Date.now() - startTime;
+      
       setResults(newResults);
       toast({
         title: "Success!",
         description: `${newResults.length} URL(s) shortened successfully`,
+      });
+      
+      logger.info('UrlShortenerForm', 'Form submission completed successfully', {
+        urlsCreated: newResults.length,
+        duration,
+        shortcodes: newResults.map(r => r.shortcode)
       });
       
       setUrlForms([{
@@ -92,7 +172,17 @@ export default function UrlShortenerForm() {
       }]);
       
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unknown error');
+      const duration = Date.now() - startTime;
+      const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+      
+      logger.error('UrlShortenerForm', 'Form submission failed', {
+        error: errorMessage,
+        duration,
+        totalForms: urlForms.length,
+        filledForms: urlForms.filter(form => form.originalUrl.trim()).length
+      });
+      
+      setError(errorMessage);
     } finally {
       setLoading(false);
     }

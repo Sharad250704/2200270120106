@@ -1,10 +1,26 @@
-
 import { Link, useLocation } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Link as LinkIcon, BarChart3 } from 'lucide-react';
+import { logger } from '@/utils/logger.js';
+import { useEffect } from 'react';
 
 export default function Navigation() {
   const location = useLocation();
+
+  useEffect(() => {
+    logger.info('Navigation', 'Page navigation', {
+      path: location.pathname,
+      timestamp: new Date().toISOString()
+    });
+  }, [location.pathname]);
+
+  const handleNavClick = (path, label) => {
+    logger.userAction('Navigation', 'Navigation clicked', {
+      from: location.pathname,
+      to: path,
+      label
+    });
+  };
 
   return (
     <nav className="border-b bg-card">
@@ -19,7 +35,7 @@ export default function Navigation() {
               variant={location.pathname === '/' ? 'default' : 'outline'}
               asChild
             >
-              <Link to="/">
+              <Link to="/" onClick={() => handleNavClick('/', 'Shorten URLs')}>
                 <LinkIcon className="h-4 w-4 mr-2" />
                 Shorten URLs
               </Link>
@@ -28,7 +44,7 @@ export default function Navigation() {
               variant={location.pathname === '/statistics' ? 'default' : 'outline'}
               asChild
             >
-              <Link to="/statistics">
+              <Link to="/statistics" onClick={() => handleNavClick('/statistics', 'Statistics')}>
                 <BarChart3 className="h-4 w-4 mr-2" />
                 Statistics
               </Link>
